@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)">
+<title>Stash</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%23ea580c'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f6f5f2; --surface: #ffffff; --surface-2: #ecebe6; --text: #1c1b19; --muted: #66635d;
+    --border: #dcd9d2; --accent: #c2410c; --accent-text: #ffffff; --ok: #15803d;
+    --danger: #b91c1c; --danger-bg: #fdecec; --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121211; --surface: #1c1c1a; --surface-2: #2a2927; --text: #f2f1ee; --muted: #a19e97;
+      --border: #34332f; --accent: #fb923c; --accent-text: #1a0e05; --ok: #4ade80;
+      --danger: #fca5a5; --danger-bg: #3a1818;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 12px 16px 40px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 0 4px; }
+  h1 { font-size: 1.6rem; margin: 0; letter-spacing: -0.02em; }
+  h2 { font-size: 1.05rem; margin: 28px 0 10px; }
+  .sub { margin: 0 0 14px; color: var(--muted); font-size: 0.95rem; }
+  .pill { font-size: 0.8rem; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+  .pill.ok { color: var(--ok); }
+  .pill.err { color: var(--danger); }
+  .stage { position: relative; margin: 0 auto; width: 100%; aspect-ratio: 4 / 3; background: #000; border-radius: var(--radius); overflow: hidden; }
+  .stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .stage video { object-fit: fill; }
+  .stage-msg {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: 16px; text-align: center; color: #fff; font-size: 0.95rem; background: rgba(0, 0, 0, 0.5);
+  }
+  .stage-msg[hidden] { display: none; }
+  .btn {
+    display: block; width: 100%; min-height: 50px; margin-top: 12px; border: 0; border-radius: 12px;
+    background: var(--accent); color: var(--accent-text); font: inherit; font-weight: 650; cursor: pointer;
+  }
+  .btn.secondary { background: var(--surface-2); color: var(--text); }
+  .btn:disabled { opacity: 0.6; }
+  .alert { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--danger-bg); color: var(--danger); font-size: 0.95rem; }
+  .alert[hidden] { display: none; }
+  label { display: block; font-weight: 650; margin-bottom: 8px; }
+  input[type="search"] {
+    width: 100%; min-height: 48px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font: inherit; font-size: 16px; -webkit-appearance: none; appearance: none;
+  }
+  input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .result { margin-top: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .card img { display: block; width: 100%; max-height: 320px; object-fit: contain; background: #000; }
+  .card .body { padding: 12px 14px; }
+  .card .title { font-weight: 650; font-size: 1.05rem; }
+  .muted { color: var(--muted); font-size: 0.92rem; }
+  .log { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .row { display: flex; gap: 12px; align-items: center; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .thumb { width: 72px; height: 54px; flex: none; object-fit: cover; border-radius: 8px; background: #000; }
+  .row .meta { min-width: 0; }
+  .row .item { font-weight: 650; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Stash</h1>
+    <span id="modelStatus" class="pill" role="status">Loading model…</span>
+  </header>
+  <p class="sub">Point the camera at where you set things down. Stash notes where they land.</p>
+
+  <div id="stage" class="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="overlay"></canvas>
+    <div id="stageMsg" class="stage-msg">Camera is off</div>
+  </div>
+  <button id="camBtn" class="btn" type="button">Start camera</button>
+  <div id="alert" class="alert" role="alert" hidden></div>
+
+  <section>
+    <h2><label for="q">Where is my…</label></h2>
+    <form id="searchForm" role="search" autocomplete="off">
+      <input id="q" type="search" placeholder="phone, mug, remote…" enterkeyhint="search" autocapitalize="none" spellcheck="false">
+    </form>
+    <div id="result" class="result" aria-live="polite"></div>
+  </section>
+
+  <section>
+    <h2>Recent</h2>
+    <ol id="log" class="log"></ol>
+    <p id="logEmpty" class="muted">Nothing logged yet. Start the camera, then pick something up and put it down.</p>
+  </section>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const CONFIG = Object.freeze({
+    TF_URL: 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js',
+    COCO_URL: 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js',
+    DETECT_INTERVAL_MS: 250,   // 4 fps
+    MOVE_THRESHOLD: 0.04,      // fraction of frame width
+    PLACE_STILL_MS: 2000,
+    LEFT_VIEW_MS: 3000,
+    CONFIRM_DETECTIONS: 2,
+    MIN_SCORE: 0.5,
+    MAX_EVENTS: 100,
+    CROP_MAX_PX: 360,
+    FULL_MAX_PX: 480,
+    JPEG_QUALITY: 0.75,
+    CLOCK_REFRESH_MS: 15000,
+  });
+
+  const TRACKED = Object.freeze(['cell phone', 'cup', 'bottle', 'book', 'remote', 'scissors', 'backpack', 'handbag', 'laptop', 'mouse']);
+  const DISPLAY = Object.freeze({
+    'cell phone': 'Phone', cup: 'Cup', bottle: 'Bottle', book: 'Book', remote: 'Remote',
+    scissors: 'Scissors', backpack: 'Backpack', handbag: 'Handbag', laptop: 'Laptop', mouse: 'Mouse',
+  });
+  const ALIASES = Object.freeze({
+    phone: 'cell phone', cellphone: 'cell phone', mobile: 'cell phone', iphone: 'cell phone',
+    mug: 'cup', coffee: 'cup', water: 'bottle', 'water bottle': 'bottle', bag: 'backpack',
+    purse: 'handbag', 'remote control': 'remote', 'tv remote': 'remote', clicker: 'remote',
+    computer: 'laptop', 'computer mouse': 'mouse',
+  });
+  const STATE_COLOR = Object.freeze({ SEEN: '#cbd5e1', MOVING: '#fb923c', PLACED: '#22c55e' });
+  const STATE_LABEL = Object.freeze({ SEEN: 'seen', MOVING: 'moving', PLACED: 'placed' });
+  const MSG = Object.freeze({
+    https: 'The camera needs HTTPS. This page was opened over plain http://, so the browser blocks the camera. Open the https:// link instead.',
+    unsupported: 'This browser can’t access the camera. On iPhone, use Safari (iOS 14.3 or newer).',
+    denied: 'Camera access was blocked. On iPhone: tap “aA” in the address bar › Website Settings › Camera › Allow (or Settings › Safari › Camera), then reload.',
+    notFound: 'No camera was found on this device.',
+    busy: 'The camera is in use by another app. Close it and try again.',
+    modelFailed: 'Couldn’t load the detection model. Check your connection and reload the page.',
+    modelLoading: 'Camera is on. The detection model is still loading, and tracking will start automatically.',
+    ended: 'The camera stopped (another app may have taken it). Tap Start camera to resume.',
+  });
+
+  const $ = (id) => document.getElementById(id);
+  const video = $('video');
+  const overlay = $('overlay');
+  const octx = overlay.getContext('2d');
+  const stage = $('stage');
+  const stageMsg = $('stageMsg');
+  const camBtn = $('camBtn');
+  const alertEl = $('alert');
+  const modelStatus = $('modelStatus');
+  const queryInput = $('q');
+  const resultEl = $('result');
+  const logEl = $('log');
+  const logEmpty = $('logEmpty');
+
+  const frameCanvas = document.createElement('canvas');
+  const frameCtx = frameCanvas.getContext('2d');
+  const lastFrames = new Map(); // class -> canvas holding the last frame the item was seen in
+
+  let model = null;
+  let modelFailed = false;
+  let stream = null;
+  let loopTimer = null;
+  let tick = 0;
+  let trackers = {};
+  let events = [];
+  let eventSeq = 0;
+
+  // ---------- helpers ----------
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  };
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const centerOf = ([x, y, w, h]) => ({ x: x + w / 2, y: y + h / 2 });
+
+  function showAlert(message) { alertEl.textContent = message; alertEl.hidden = false; }
+  function hideAlert() { alertEl.hidden = true; alertEl.textContent = ''; }
+  function setStageMsg(message) { stageMsg.textContent = message || ''; stageMsg.hidden = !message; }
+  function setModelStatus(kind, text) { modelStatus.className = `pill ${kind}`; modelStatus.textContent = text; }
+
+  function coarsePosition(box, W, H) {
+    const c = centerOf(box);
+    const col = c.x < W / 3 ? 'left' : c.x > (2 * W) / 3 ? 'right' : 'center';
+    const row = c.y < H / 3 ? 'top' : c.y > (2 * H) / 3 ? 'bottom' : 'middle';
+    if (row === 'middle') return col === 'center' ? 'center of view' : `${col} side of view`;
+    return `${row} ${col} of view`;
+  }
+
+  function timeAgo(t) {
+    const s = Math.round((Date.now() - t) / 1000);
+    if (s < 10) return 'just now';
+    if (s < 60) return `${s}s ago`;
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m} min ago`;
+    return `${Math.round(m / 60)} hr ago`;
+  }
+  const clock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.crossOrigin = 'anonymous';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  }
+
+  // ---------- snapshots ----------
+  function strokeBox(ctx, x, y, w, h, color, scale) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(2, Math.round(3 * scale));
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  function cropSnapshot(source, box, color) {
+    const [x, y, w, h] = box;
+    const pad = Math.max(w, h) * 0.6 + 24;
+    const x0 = clamp(x - pad, 0, source.width), y0 = clamp(y - pad, 0, source.height);
+    const x1 = clamp(x + w + pad, 0, source.width), y1 = clamp(y + h + pad, 0, source.height);
+    const cw = Math.max(1, x1 - x0), ch = Math.max(1, y1 - y0);
+    const scale = Math.min(1, CONFIG.CROP_MAX_PX / Math.max(cw, ch));
+    const c = document.createElement('canvas');
+    c.width = Math.round(cw * scale);
+    c.height = Math.round(ch * scale);
+    const ctx = c.getContext('2d');
+    ctx.drawImage(source, x0, y0, cw, ch, 0, 0, c.width, c.height);
+    strokeBox(ctx, (x - x0) * scale, (y - y0) * scale, w * scale, h * scale, color, 1);
+    return c.toDataURL('image/jpeg', CONFIG.JPEG_QUALITY);
+  }
+
+  function fullSnapshot(source, box, color) {
+    const scale = Math.min(1, CONFIG.FULL_MAX_PX / source.width);
+    const c = document.createElement('canvas');
+    c.width = Math.round(source.width * scale);
+    c.height = Math.round(source.height * scale);
+    const ctx = c.getContext('2d');
+    ctx.drawImage(source, 0, 0, c.width, c.height);
+    const [x, y, w, h] = box;
+    strokeBox(ctx, x * scale, y * scale, w * scale, h * scale, color, 1);
+    return c.toDataURL('image/jpeg', CONFIG.JPEG_QUALITY);
+  }
+
+  function rememberFrame(cls) {
+    const existing = lastFrames.get(cls);
+    const c = existing || document.createElement('canvas');
+    if (c.width !== frameCanvas.width || c.height !== frameCanvas.height) {
+      c.width = frameCanvas.width;
+      c.height = frameCanvas.height;
+    }
+    c.getContext('2d').drawImage(frameCanvas, 0, 0);
+    if (!existing) lastFrames.set(cls, c);
+  }
+
+  // ---------- tracking state machine (pure) ----------
+  // States: PENDING (unconfirmed) -> SEEN -> MOVING -> PLACED; LEFT VIEW removes the tracker.
+  function onDetected(prev, cls, box, now, t, frameW) {
+    const center = centerOf(box);
+    if (!prev) {
+      return {
+        tracker: { cls, state: 'PENDING', box, center, lastSeen: now, lastTick: t, seenStreak: 1, moveStreak: 0, stillStreak: 1, stillSince: now },
+        event: null,
+      };
+    }
+    const consecutive = prev.lastTick === t - 1;
+    const dist = Math.hypot(center.x - prev.center.x, center.y - prev.center.y) / frameW;
+    const moved = dist > CONFIG.MOVE_THRESHOLD;
+    const seenStreak = consecutive ? prev.seenStreak + 1 : 1;
+    const moveStreak = moved ? (consecutive ? prev.moveStreak + 1 : 1) : 0;
+    const stillStreak = moved ? 0 : (consecutive ? prev.stillStreak + 1 : 1);
+    const stillSince = moved ? null : (prev.stillSince ?? now);
+    const need = CONFIG.CONFIRM_DETECTIONS;
+
+    let state = prev.state;
+    let event = null;
+    if (state === 'PENDING' && seenStreak >= need) state = 'SEEN';
+    if ((state === 'SEEN' || state === 'PLACED') && moveStreak >= need) state = 'MOVING';
+    if (state === 'MOVING' && stillStreak >= need && stillSince !== null && now - stillSince >= CONFIG.PLACE_STILL_MS) {
+      state = 'PLACED';
+      event = 'placed';
+    }
+    return {
+      tracker: { ...prev, state, box, center, lastSeen: now, lastTick: t, seenStreak, moveStreak, stillStreak, stillSince },
+      event,
+    };
+  }
+
+  function onMissing(prev, now) {
+    if (prev.state === 'PENDING') return { tracker: null, event: null };
+    if (prev.state !== 'PLACED' && now - prev.lastSeen >= CONFIG.LEFT_VIEW_MS) return { tracker: null, event: 'left' };
+    return { tracker: prev, event: null };
+  }
+
+  function bestPerClass(predictions) {
+    const best = new Map();
+    for (const p of predictions) {
+      if (!TRACKED.includes(p.class)) continue;
+      const current = best.get(p.class);
+      if (!current || p.score > current.score) best.set(p.class, p);
+    }
+    return best;
+  }
+
+  function makeEvent(type, tracker, W, H) {
+    const image = type === 'placed'
+      ? cropSnapshot(frameCanvas, tracker.box, STATE_COLOR.PLACED)
+      : fullSnapshot(lastFrames.get(tracker.cls) || frameCanvas, tracker.box, STATE_COLOR.MOVING);
+    eventSeq += 1;
+    return Object.freeze({
+      id: eventSeq, type, cls: tracker.cls, position: coarsePosition(tracker.box, W, H), time: Date.now(), image,
+    });
+  }
+
+  // ---------- detection loop ----------
+  async function runDetection() {
+    const W = video.videoWidth, H = video.videoHeight;
+    if (!W || !H) return;
+    if (frameCanvas.width !== W || frameCanvas.height !== H) { frameCanvas.width = W; frameCanvas.height = H; }
+    frameCtx.drawImage(video, 0, 0, W, H);
+    const predictions = await model.detect(frameCanvas, 20, CONFIG.MIN_SCORE);
+    if (!stream) return;
+
+    const now = Date.now();
+    tick += 1;
+    const best = bestPerClass(predictions);
+    const next = {};
+    const newEvents = [];
+
+    for (const [cls, det] of best) {
+      const { tracker, event } = onDetected(trackers[cls], cls, det.bbox, now, tick, W);
+      next[cls] = tracker;
+      if (tracker.state === 'SEEN' || tracker.state === 'MOVING') rememberFrame(cls);
+      if (event) newEvents.push(makeEvent(event, tracker, W, H));
+    }
+    for (const cls of Object.keys(trackers)) {
+      if (best.has(cls)) continue;
+      const { tracker, event } = onMissing(trackers[cls], now);
+      if (tracker) next[cls] = tracker;
+      if (event) newEvents.push(makeEvent(event, trackers[cls], W, H));
+      if (!tracker) lastFrames.delete(cls);
+    }
+    trackers = next;
+    drawOverlay(W, H);
+    if (newEvents.length) addEvents(newEvents);
+  }
+
+  async function detectLoop() {
+    if (!stream) return;
+    const started = performance.now();
+    if (model && video.readyState >= 2 && !document.hidden) {
+      try {
+        await runDetection();
+      } catch (err) {
+        console.warn('Detection failed:', err);
+        showAlert(`Detection hit a problem (${err.message}). It will keep trying.`);
+      }
+    }
+    if (stream) loopTimer = setTimeout(detectLoop, Math.max(0, CONFIG.DETECT_INTERVAL_MS - (performance.now() - started)));
+  }
+
+  function drawOverlay(W, H) {
+    if (overlay.width !== W || overlay.height !== H) { overlay.width = W; overlay.height = H; }
+    octx.clearRect(0, 0, W, H);
+    const lw = Math.max(2, Math.round(W / 160));
+    const fs = Math.max(12, Math.round(W / 28));
+    octx.font = `600 ${fs}px -apple-system, system-ui, sans-serif`;
+    octx.textBaseline = 'middle';
+    octx.lineWidth = lw;
+    for (const t of Object.values(trackers)) {
+      if (t.lastTick !== tick || t.state === 'PENDING') continue;
+      const color = STATE_COLOR[t.state];
+      const [x, y, w, h] = t.box;
+      octx.strokeStyle = color;
+      octx.strokeRect(x, y, w, h);
+      const label = `${DISPLAY[t.cls]} · ${STATE_LABEL[t.state]}`;
+      const tw = octx.measureText(label).width + fs * 0.7;
+      const th = fs * 1.5;
+      const ly = y - th >= 0 ? y - th : y;
+      octx.fillStyle = color;
+      octx.fillRect(x - lw / 2, ly, tw, th);
+      octx.fillStyle = '#0b0b0b';
+      octx.fillText(label, x + fs * 0.35, ly + th / 2);
+    }
+  }
+
+  // ---------- camera ----------
+  function sizeStage() {
+    const W = video.videoWidth, H = video.videoHeight;
+    if (!W || !H) return;
+    stage.style.aspectRatio = `${W} / ${H}`;
+    stage.style.width = `min(100%, ${((W / H) * 60).toFixed(2)}vh)`;
+  }
+
+  function cameraErrorMessage(err) {
+    const name = err && err.name;
+    if (name === 'NotAllowedError' || name === 'SecurityError') return MSG.denied;
+    if (name === 'NotFoundError' || name === 'OverconstrainedError') return MSG.notFound;
+    if (name === 'NotReadableError' || name === 'AbortError') return MSG.busy;
+    return `Couldn’t start the camera (${name || 'unknown error'}).`;
+  }
+
+  function updateStageMsg() {
+    if (!stream) return setStageMsg('Camera is off');
+    if (modelFailed) return setStageMsg('Detection model failed to load');
+    if (!model) return setStageMsg('Loading detection model…');
+    return setStageMsg('');
+  }
+
+  async function startCamera() {
+    hideAlert();
+    if (!window.isSecureContext) return showAlert(MSG.https);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return showAlert(MSG.unsupported);
+    camBtn.disabled = true;
+    setStageMsg('Starting camera…');
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+    } catch (err) {
+      stream = null;
+      camBtn.disabled = false;
+      setStageMsg('Camera is off');
+      return showAlert(cameraErrorMessage(err));
+    }
+    stream.getVideoTracks().forEach((track) => track.addEventListener('ended', () => { stopCamera(); showAlert(MSG.ended); }));
+    video.srcObject = stream;
+    try {
+      await video.play();
+    } catch (err) {
+      stopCamera();
+      return showAlert(`Couldn’t play the camera feed (${err.name}). Tap Start camera again.`);
+    }
+    sizeStage();
+    camBtn.disabled = false;
+    camBtn.textContent = 'Stop camera';
+    camBtn.classList.add('secondary');
+    if (!model && !modelFailed) showAlert(MSG.modelLoading);
+    updateStageMsg();
+    detectLoop();
+  }
+
+  function stopCamera() {
+    clearTimeout(loopTimer);
+    loopTimer = null;
+    if (stream) stream.getTracks().forEach((track) => track.stop());
+    stream = null;
+    video.srcObject = null;
+    trackers = {};
+    lastFrames.clear();
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    camBtn.disabled = false;
+    camBtn.textContent = 'Start camera';
+    camBtn.classList.remove('secondary');
+    updateStageMsg();
+  }
+
+  // ---------- model ----------
+  async function loadModel() {
+    setModelStatus('', 'Loading model…');
+    try {
+      await loadScript(CONFIG.TF_URL);
+      await loadScript(CONFIG.COCO_URL);
+      await window.tf.ready();
+      model = await window.cocoSsd.load({ base: 'lite_mobilenet_v2' });
+      setModelStatus('ok', 'Model ready');
+      if (alertEl.textContent === MSG.modelLoading) hideAlert();
+    } catch (err) {
+      modelFailed = true;
+      console.warn('Model load failed:', err);
+      setModelStatus('err', 'Model failed');
+      showAlert(MSG.modelFailed);
+    }
+    updateStageMsg();
+  }
+
+  // ---------- events, search, log ----------
+  function addEvents(newEvents) {
+    events = [...newEvents, ...events].slice(0, CONFIG.MAX_EVENTS);
+    renderLog();
+    renderResult();
+  }
+
+  function describe(ev) {
+    return ev.type === 'placed' ? `Put down · ${ev.position}` : `Last seen · ${ev.position}, then left view`;
+  }
+
+  function resolveItem(raw) {
+    const q = raw.toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .replace(/\b(where|is|are|did|i|put|leave|left|my|the|a|an)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!q) return { query: '', cls: null };
+    const forms = [q, q.replace(/es$/, ''), q.replace(/s$/, '')];
+    for (const f of forms) {
+      if (ALIASES[f]) return { query: q, cls: ALIASES[f] };
+      if (TRACKED.includes(f)) return { query: q, cls: f };
+    }
+    for (const f of forms) {
+      if (f.length < 3) continue;
+      const cls = TRACKED.find((c) => f.includes(c) || c.includes(f));
+      if (cls) return { query: q, cls };
+      const alias = Object.keys(ALIASES).find((k) => f.includes(k));
+      if (alias) return { query: q, cls: ALIASES[alias] };
+    }
+    return { query: q, cls: null };
+  }
+
+  function renderResult() {
+    const { query, cls } = resolveItem(queryInput.value);
+    if (!query) return resultEl.replaceChildren();
+    if (!cls) {
+      const list = TRACKED.map((c) => DISPLAY[c].toLowerCase()).join(', ');
+      return resultEl.replaceChildren(el('p', 'muted', `Stash can’t recognize “${query}” yet. It can find: ${list}.`));
+    }
+    const ev = events.find((e) => e.cls === cls);
+    if (!ev) {
+      return resultEl.replaceChildren(el('p', 'muted', `No sightings of your ${DISPLAY[cls].toLowerCase()} yet. Keep the camera on and put it down in view.`));
+    }
+    const card = el('div', 'card');
+    const img = el('img');
+    img.src = ev.image;
+    img.alt = `Snapshot of your ${DISPLAY[cls].toLowerCase()}`;
+    const body = el('div', 'body');
+    body.append(
+      el('div', 'title', `${DISPLAY[cls]}: ${ev.type === 'placed' ? 'put down at the ' : 'last seen at the '}${ev.position}`),
+      el('div', 'muted', `${timeAgo(ev.time)} · ${clock(ev.time)}${ev.type === 'left' ? ' · then it left the frame' : ''}`),
+    );
+    card.append(img, body);
+    resultEl.replaceChildren(card);
+  }
+
+  function eventRow(ev) {
+    const li = el('li', 'row');
+    const img = el('img', 'thumb');
+    img.src = ev.image;
+    img.alt = '';
+    img.width = 72;
+    img.height = 54;
+    const meta = el('div', 'meta');
+    meta.append(el('div', 'item', DISPLAY[ev.cls]), el('div', 'muted', describe(ev)), el('div', 'muted', `${timeAgo(ev.time)} · ${clock(ev.time)}`));
+    li.append(img, meta);
+    return li;
+  }
+
+  function renderLog() {
+    logEl.replaceChildren(...events.map(eventRow));
+    logEmpty.hidden = events.length > 0;
+  }
+
+  // ---------- wiring ----------
+  camBtn.addEventListener('click', () => (stream ? stopCamera() : startCamera()));
+  video.addEventListener('resize', sizeStage);
+  queryInput.addEventListener('input', renderResult);
+  $('searchForm').addEventListener('submit', (e) => { e.preventDefault(); queryInput.blur(); renderResult(); });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && stream && video.paused) {
+      video.play().catch((err) => showAlert(`Camera paused (${err.name}). Tap Stop camera, then Start camera.`));
+    }
+  });
+  setInterval(() => { if (events.length) { renderLog(); renderResult(); } }, CONFIG.CLOCK_REFRESH_MS);
+
+  if (!window.isSecureContext) showAlert(MSG.https);
+  loadModel();
+})();
+</script>
+</body>
+</html>
