@@ -266,16 +266,21 @@
 
   // ---------- tracking state machine (pure) ----------
   // States: PENDING (unconfirmed) -> SEEN -> MOVING -> PLACED; LEFT VIEW removes the tracker.
+  // At rest (SEEN/PLACED) motion is measured from the resting anchor, so an item moved while
+  // hidden (hand, blur) still counts as moved once it reappears somewhere else.
+  const isResting = (state) => state === 'SEEN' || state === 'PLACED';
+
   function onDetected(prev, cls, box, now, t, frameW) {
     const center = centerOf(box);
     if (!prev) {
       return {
-        tracker: { cls, state: 'PENDING', box, center, lastSeen: now, lastTick: t, seenStreak: 1, moveStreak: 0, stillStreak: 1, stillSince: now },
+        tracker: { cls, state: 'PENDING', box, center, anchor: center, lastSeen: now, lastTick: t, seenStreak: 1, moveStreak: 0, stillStreak: 1, stillSince: now },
         event: null,
       };
     }
     const consecutive = prev.lastTick === t - 1;
-    const dist = Math.hypot(center.x - prev.center.x, center.y - prev.center.y) / frameW;
+    const ref = isResting(prev.state) ? prev.anchor : prev.center;
+    const dist = Math.hypot(center.x - ref.x, center.y - ref.y) / frameW;
     const moved = dist > CONFIG.MOVE_THRESHOLD;
     const seenStreak = consecutive ? prev.seenStreak + 1 : 1;
     const moveStreak = moved ? (consecutive ? prev.moveStreak + 1 : 1) : 0;
@@ -291,8 +296,9 @@
       state = 'PLACED';
       event = 'placed';
     }
+    const anchor = isResting(state) && !isResting(prev.state) ? center : prev.anchor;
     return {
-      tracker: { ...prev, state, box, center, lastSeen: now, lastTick: t, seenStreak, moveStreak, stillStreak, stillSince },
+      tracker: { ...prev, state, box, center, anchor, lastSeen: now, lastTick: t, seenStreak, moveStreak, stillStreak, stillSince },
       event,
     };
   }
@@ -303,12 +309,17 @@
     return { tracker: prev, event: null };
   }
 
-  function bestPerClass(predictions) {
+  // One instance per class: follow the detection nearest the tracked item so two same-class
+  // objects don't swap identity; fall back to the highest score when nothing is tracked yet.
+  function bestPerClass(predictions, current) {
     const best = new Map();
     for (const p of predictions) {
       if (!TRACKED.includes(p.class)) continue;
-      const current = best.get(p.class);
-      if (!current || p.score > current.score) best.set(p.class, p);
+      const chosen = best.get(p.class);
+      const tracked = current[p.class];
+      const distTo = (bbox) => { const c = centerOf(bbox); return Math.hypot(c.x - tracked.center.x, c.y - tracked.center.y); };
+      const better = !chosen || (tracked ? distTo(p.bbox) < distTo(chosen.bbox) : p.score > chosen.score);
+      if (better) best.set(p.class, p);
     }
     return best;
   }
@@ -334,7 +345,7 @@
 
     const now = Date.now();
     tick += 1;
-    const best = bestPerClass(predictions);
+    const best = bestPerClass(predictions, trackers);
     const next = {};
     const newEvents = [];
 
